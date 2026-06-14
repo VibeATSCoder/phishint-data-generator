@@ -1,0 +1,11 @@
+id,url
+en_simple_login,https://example.com/
+fa_news_site,https://www.bbc.com/persian
+en_news_site,https://news.ycombinator.com/
+github_login,https://github.com/login
+spa_react,https://reactjs.org/
+deliberately_invalid_host,https://nonexistent-host-12345.invalid/
+en_login_form,https://stackoverflow.com/users/login
+fa_ir_university,https://www.um.ac.ir/
+en_with_apple_touch_icon,https://www.npmjs.com/
+en_inline_svg_heavy,https://github.com/

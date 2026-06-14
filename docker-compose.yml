@@ -1,0 +1,49 @@
+services:
+
+  # ── FastAPI backend ──────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: phishgen_api:latest
+    container_name: phishgen_api
+    restart: unless-stopped
+    environment:
+      # Set your Anthropic API key for AI cloning (T23)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLEARBIT_API_KEY=${CLEARBIT_API_KEY:-}
+      - DEBUG=false
+      - DATA_DIR=/data
+    ports:
+      - "8009:8009"   # Direct API access + Swagger UI at http://localhost:8009/docs
+    volumes:
+      # Bulk-job artifacts (SQLite + per-job folders) - visible on host at ./data
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8009/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - phishnet
+
+  # ── nginx UI ─────────────────────────────────────────────────────────────────
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    image: phishgen_ui:latest
+    container_name: phishgen_ui
+    restart: unless-stopped
+    ports:
+      - "3050:80"     # UI at http://localhost:3050
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - phishnet
+
+networks:
+  phishnet:
+    driver: bridge

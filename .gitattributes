@@ -1,0 +1,7 @@
+# Force LF line endings on shell scripts and config files so they work
+# inside Linux containers even when the repo is checked out on Windows.
+*.sh        text eol=lf
+entrypoint* text eol=lf
+Dockerfile* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
