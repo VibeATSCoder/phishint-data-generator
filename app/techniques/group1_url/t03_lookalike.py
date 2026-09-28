@@ -78,7 +78,17 @@ class LookAlikeTechnique(BaseTechnique):
             if lang == "fa"
             else ["login", "secure", "verify", "account"]
         )
-        trust_words: list[str] = options.get("trust_words", default_words)
+        configured_words = options.get("trust_words")
+        schema_default_words = ["login", "secure", "verify", "account", "update", "signin"]
+        # get_default_options() materializes the schema default, so a simple
+        # dict.get(..., default_words) never selected the Persian word bank.
+        # Treat the untouched schema value as automatic and preserve any
+        # genuinely customized list.
+        trust_words: list[str] = (
+            default_words
+            if configured_words in (None, schema_default_words)
+            else configured_words
+        )
         leet_density: float = float(options.get("leet_density", 0.4))
         strategy: str = options.get("strategy", "prepend")
         num_words: int = int(options.get("num_words", 1))

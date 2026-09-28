@@ -13,6 +13,7 @@ from app.core.report import ReportBuilder
 from app.core.registry import TechniqueRegistry
 from app.core.screenshot import get_screenshot_service
 from app.core.screenshot_pipeline import render_run_screenshots
+from app.techniques.base import Requirement
 from app.utils.html_utils import normalize_charset_utf8
 from app.utils.upload_utils import read_with_cap
 
@@ -44,6 +45,10 @@ async def generate(
             "Render per-technique screenshots into the ZIP (always-on by default). "
             "Set false to skip rendering for faster experiments."
         ),
+    ),
+    html_only: bool = Form(
+        False,
+        description="Exclude URL-only techniques and URL-variation artifacts.",
     ),
     llm_provider: str = Form("", description="LLM provider for AI techniques: 'anthropic' or 'openai' (or any OpenAI-compatible API)."),
     llm_base_url: str = Form("", description="LLM base URL (e.g. https://api.openai.com/v1, https://openrouter.ai/api/v1, http://ollama:11434/v1). Empty uses provider default."),
@@ -99,6 +104,21 @@ async def generate(
             detail=f"Unknown technique IDs: {unknown}",
         )
 
+    if html_only:
+        configs = [
+            config for config in configs
+            if set(TechniqueRegistry.get(config.technique_id).REQUIREMENTS)
+            != {Requirement.HAS_URL}
+        ]
+        if not configs:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "HTML-only mode excluded every selected technique; "
+                    "select at least one HTML technique (T07-T25)"
+                ),
+            )
+
     llm_credentials = {
         "provider": llm_provider, "base_url": llm_base_url,
         "api_key": llm_api_key, "model": llm_model,
@@ -114,6 +134,12 @@ async def generate(
         screenshot_bytes,
         llm_credentials,
     )
+
+    if html_only:
+        result.final_url = result.original_url
+        for technique_result in result.technique_results:
+            technique_result.modified_url = None
+            technique_result.url_before = None
 
     if include_report:
         result.report_markdown = ReportBuilder.build(result)

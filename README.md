@@ -11,7 +11,41 @@ A security research service that generates phishing page variants across **25 do
 | Service | Port | Description |
 |---------|------|-------------|
 | **UI** | `3050` | Web interface - upload HTML, analyze, generate |
-| **API** | `8000` | FastAPI backend - REST endpoints + Swagger docs |
+| **API** | `8009` | FastAPI backend - REST endpoints + Swagger docs |
+
+---
+
+## One-line installer
+
+On Linux, macOS, WSL, or Git Bash, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/VibeATSCoder/phishint-data-generator/main/install.sh | bash
+```
+
+The installer clones or updates the repository, creates `.env`, checks Docker
+Compose, builds both images, starts the service, waits for the health checks,
+and prints the UI and API addresses. It preserves existing configuration and
+job data when run again.
+
+Useful variants:
+
+```bash
+# Choose the install directory
+curl -fsSL https://raw.githubusercontent.com/VibeATSCoder/phishint-data-generator/main/install.sh \
+  | bash -s -- --dir ~/services/phishint-data-generator
+
+# Download and configure without building or starting
+curl -fsSL https://raw.githubusercontent.com/VibeATSCoder/phishint-data-generator/main/install.sh \
+  | bash -s -- --download-only
+
+# From an existing checkout
+bash install.sh
+```
+
+Technique 23 can use `ANTHROPIC_API_KEY`. The installer asks for it when a
+terminal is available, or accepts it from the environment. All other techniques
+remain available when it is omitted.
 
 ---
 
@@ -45,8 +79,8 @@ docker compose version    # Docker Compose version v2.x
 ### Step 1 - Clone the repository
 
 ```bash
-git clone https://github.com/your-org/phish_data_generator.git
-cd phish_data_generator
+git clone https://github.com/VibeATSCoder/phishint-data-generator.git
+cd phishint-data-generator
 ```
 
 ### Step 2 - Configure environment
@@ -102,17 +136,17 @@ docker compose ps
 
 # Expected output:
 # NAME            STATUS              PORTS
-# phishgen_api    Up (healthy)        0.0.0.0:8000->8000/tcp
+# phishgen_api    Up (healthy)        0.0.0.0:8009->8009/tcp
 # phishgen_ui     Up                  0.0.0.0:3050->80/tcp
 ```
 
 Test the API directly:
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8009/health
 # {"status":"ok"}
 
-curl http://localhost:8000/techniques | python3 -m json.tool | head -20
+curl http://localhost:8009/techniques | python3 -m json.tool | head -20
 # 25 techniques listed
 ```
 
@@ -121,8 +155,8 @@ curl http://localhost:8000/techniques | python3 -m json.tool | head -20
 | Interface | URL |
 |-----------|-----|
 | Web UI | `http://YOUR_SERVER_IP:3050` |
-| Swagger (interactive API docs) | `http://YOUR_SERVER_IP:8000/docs` |
-| ReDoc (API reference) | `http://YOUR_SERVER_IP:8000/redoc` |
+| Swagger (interactive API docs) | `http://YOUR_SERVER_IP:8009/docs` |
+| ReDoc (API reference) | `http://YOUR_SERVER_IP:8009/redoc` |
 
 Replace `YOUR_SERVER_IP` with your server's IP address or hostname.
 
@@ -197,13 +231,13 @@ phish_<run_id>.zip
 ### List all 25 techniques
 
 ```bash
-curl http://localhost:8000/techniques
+curl http://localhost:8009/techniques
 ```
 
 ### Analyze HTML applicability
 
 ```bash
-curl -X POST http://localhost:8000/analyze \
+curl -X POST http://localhost:8009/analyze \
   -F "url=https://www.example.com/login" \
   -F "html_file=@/path/to/page.html"
 ```
@@ -224,7 +258,7 @@ Response:
 ### Generate phishing variants
 
 ```bash
-curl -X POST http://localhost:8000/generate \
+curl -X POST http://localhost:8009/generate \
   -F "url=https://www.example.com/login" \
   -F "html_file=@/path/to/page.html" \
   -F 'technique_configs=[{"technique_id":1},{"technique_id":4},{"technique_id":10}]' \
@@ -395,16 +429,16 @@ If your server has a firewall, open the required ports:
 ```bash
 # UFW (Ubuntu/Debian)
 sudo ufw allow 3050/tcp    # UI
-sudo ufw allow 8000/tcp    # API (optional - only if direct API access needed)
+sudo ufw allow 8009/tcp    # API (optional - only if direct API access needed)
 sudo ufw reload
 
 # firewalld (CentOS/RHEL)
 sudo firewall-cmd --permanent --add-port=3050/tcp
-sudo firewall-cmd --permanent --add-port=8000/tcp
+sudo firewall-cmd --permanent --add-port=8009/tcp
 sudo firewall-cmd --reload
 ```
 
-> Tip: If you only want to expose the UI publicly and keep the API internal, omit port 8000 from firewall rules. The UI proxies all API calls through nginx on port 3050 internally.
+> Tip: If you only want to expose the UI publicly and keep the API internal, omit port 8009 from firewall rules. The UI proxies all API calls through nginx on port 3050 internally.
 
 ---
 
@@ -422,8 +456,8 @@ This is the fastest path. Build the Docker images once on any machine with inter
 
 ```bash
 # 1. Clone the repo and build images
-git clone https://github.com/your-org/phish_data_generator.git
-cd phish_data_generator
+git clone https://github.com/VibeATSCoder/phishint-data-generator.git
+cd phishint-data-generator
 docker compose build
 
 # 2. Verify the image names (should show phishgen_api and phishgen_ui)
@@ -452,7 +486,7 @@ docker load -i phishgen_images.tar
 docker images | grep phishgen
 
 # 2. Enter the repo folder and configure environment
-cd phish_data_generator
+cd phishint-data-generator
 cp .env.example .env
 nano .env   # fill in ANTHROPIC_API_KEY if you need T23
 
@@ -527,7 +561,7 @@ pip download -r requirements.txt -d ./pip_wheels/
 ```bash
 # On online machine - create a single transfer bundle
 tar czf phishgen_offline_bundle.tar.gz \
-    phish_data_generator/ \
+    phishint-data-generator/ \
     base_images.tar \
     docker-offline/ \
     pip_wheels/
@@ -552,10 +586,10 @@ docker load -i base_images.tar
 # 3. Patch the Dockerfiles to install Python packages from local wheels
 #    Add --find-links /wheels --no-index flags:
 sed -i 's|RUN pip install --no-cache-dir -r requirements.txt|COPY ../pip_wheels /wheels\nRUN pip install --no-cache-dir --find-links /wheels --no-index -r requirements.txt|' \
-    phish_data_generator/Dockerfile
+    phishint-data-generator/Dockerfile
 
 # 4. Build images (uses local base images + local wheels - no internet)
-cd phish_data_generator
+cd phishint-data-generator
 cp .env.example .env
 docker compose build
 
@@ -571,7 +605,7 @@ curl http://localhost:8009/health
 
 | File / folder | Purpose |
 |---------------|---------|
-| `phish_data_generator/` | Application source code + docker-compose.yml |
+| `phishint-data-generator/` | Application source code + docker-compose.yml |
 | `base_images.tar` | `python:3.11-slim` and `nginx:alpine` Docker base images |
 | `docker-offline/` | Docker Engine `.deb` packages for air-gapped installation |
 | `pip_wheels/` | Pre-downloaded Python package wheels (all dependencies) |
@@ -588,7 +622,7 @@ docker compose ps
 docker compose logs backend --tail=50
 
 # Test backend directly
-curl http://localhost:8000/health
+curl http://localhost:8009/health
 ```
 
 ### Backend fails to start
@@ -596,7 +630,7 @@ curl http://localhost:8000/health
 ```bash
 docker compose logs backend
 # Common causes:
-# - Port 8000 already in use: sudo lsof -i :8000
+# - Port 8009 already in use: sudo lsof -i :8009
 # - Missing system libs: docker compose build backend --no-cache
 ```
 

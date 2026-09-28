@@ -1,0 +1,31 @@
+.git
+.gitignore
+.gitattributes
+.env
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.mypy_cache
+.ruff_cache
+
+# Runtime state and generated deliverables can be many gigabytes. They are
+# bind-mounted at runtime and must never be sent to the Docker build daemon.
+data/jobs
+data/*.db
+data/*.db-shm
+data/*.db-wal
+*.zip
+*.tar
+*.tar.gz
+
+# Local editor and operating-system files.
+.vscode
+.idea
+.DS_Store
+Thumbs.db

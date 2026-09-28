@@ -594,6 +594,14 @@ async def generate_bulk(
         "",
         description="Optional JSON map {technique_id_or_T_id: percent}. When set, each entry is assigned exactly one technique by deterministic shuffled allocation; technique_configs in defaults_json is ignored. Sum must be 100 (percent) or 1.0 (fraction).",
     ),
+    include_screenshots: bool | None = Form(
+        None,
+        description="Optional UI override for screenshot generation. When omitted, manifest/default settings apply.",
+    ),
+    html_only: bool | None = Form(
+        None,
+        description="Optional UI override that excludes URL techniques and URL-variation artifacts.",
+    ),
 ) -> JobCreateResponse:
     """
     Submit a bulk dataset generation job.
@@ -662,6 +670,11 @@ async def generate_bulk(
                 shutil.rmtree(jdir, ignore_errors=True)
                 raise HTTPException(422, f"invalid defaults_json: {exc}")
 
+        if include_screenshots is not None:
+            defaults["include_screenshots"] = include_screenshots
+        if html_only is not None:
+            defaults["html_only"] = html_only
+
         if csv_file is not None:
             try:
                 raw = await read_with_cap(
@@ -690,7 +703,10 @@ async def generate_bulk(
             manifest["defaults"]["distribution_counts"] = {
                 str(tid): c for tid, c in counts.items()
             }
-            manifest["defaults"].setdefault("auto_url_pairing", True)
+            if manifest["defaults"].get("html_only", False):
+                manifest["defaults"]["auto_url_pairing"] = False
+            else:
+                manifest["defaults"].setdefault("auto_url_pairing", True)
 
         entries, defaults_resolved = _validate_manifest(manifest)
 
@@ -727,6 +743,13 @@ async def generate_bulk(
         except Exception as exc:
             shutil.rmtree(jdir, ignore_errors=True)
             raise HTTPException(422, f"manifest.json is not valid JSON: {exc}")
+
+        if include_screenshots is not None:
+            manifest.setdefault("defaults", {})["include_screenshots"] = include_screenshots
+        if html_only is not None:
+            manifest.setdefault("defaults", {})["html_only"] = html_only
+            if html_only:
+                manifest["defaults"]["auto_url_pairing"] = False
 
         entries, defaults_resolved = _validate_manifest(manifest)
 

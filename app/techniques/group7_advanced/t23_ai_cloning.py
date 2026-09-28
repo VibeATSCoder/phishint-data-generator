@@ -34,6 +34,12 @@ def _resolve_credentials(options: dict[str, Any]) -> tuple[str, str, str, str]:
         try:
             from app.config import get_settings_sync
             api_key = (get_settings_sync().anthropic_api_key or "").strip()
+            if api_key in {
+                "your_anthropic_api_key_here",
+                "replace_me",
+                "changeme",
+            }:
+                api_key = ""
             if api_key and not provider:
                 provider = "anthropic"
         except Exception:

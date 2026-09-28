@@ -1534,6 +1534,26 @@
           </span>
         </div>
 
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="screenshotToggle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label">
+            <strong>Capture Screenshots</strong> — PNG for each generated HTML in ZIP
+          </span>
+        </div>
+
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="htmlOnlyToggle">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label">
+            <strong>HTML Only</strong> — exclude URL techniques and URL variations
+          </span>
+        </div>
+
         <hr class="divider">
 
         <div id="generateError" class="error-banner" style="display:none;"></div>
@@ -1663,9 +1683,8 @@
 
           <div id="bulkDistPanel" style="display:none;margin-top:12px;">
             <div style="font-size:11px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.5;">
-              URL techniques (T1–T6) are excluded from distribution — each entry automatically gets a
-              phishing URL variation paired alongside its HTML technique. A <code>urls.csv</code>
-              with all URL+method combinations is included in the download ZIP.
+              URL techniques (T1–T6) are excluded from distribution. With HTML Only enabled,
+              each entry produces an HTML variation and its screenshots without a paired URL variation.
             </div>
 
             <div class="filter-row" style="margin-bottom:8px;">
@@ -1717,6 +1736,26 @@
             </div>
           </div>
 
+          <div class="toggle-row" style="margin-top:14px;">
+            <label class="toggle">
+              <input type="checkbox" id="bulkScreenshotToggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">
+              <strong>Capture Screenshots</strong> — PNG for each generated HTML in the result ZIP
+            </span>
+          </div>
+
+          <div class="toggle-row" style="margin-top:10px;">
+            <label class="toggle">
+              <input type="checkbox" id="bulkHtmlOnlyToggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">
+              <strong>HTML Only</strong> — generate HTML variations and screenshots without URL variations
+            </span>
+          </div>
+
           <div style="margin-top:14px;">
             <label class="field-label">Defaults JSON (optional)</label>
             <textarea id="bulkDefaultsJson" rows="8"
@@ -1727,7 +1766,8 @@
   "technique_configs": [{"technique_id":1},{"technique_id":7},{"technique_id":16}],
   "hybrid_mode": true,
   "include_report": true,
-  "include_screenshots": false,
+  "include_screenshots": true,
+  "html_only": true,
   "output_layout": "per_kind"
 }</textarea>
             <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
@@ -1784,6 +1824,7 @@
     "hybrid_mode": true,
     "include_report": true,
     "include_screenshots": true,
+    "html_only": true,
     "concurrency": 4
   },
   "entries": [
@@ -2710,12 +2751,14 @@ async function doGenerate() {
   const ssFile = document.getElementById('ssFile').files[0];
   const hybrid = document.getElementById('hybridToggle').checked;
   const report = document.getElementById('reportToggle').checked;
+  const screenshots = document.getElementById('screenshotToggle').checked;
+  const htmlOnly = document.getElementById('htmlOnlyToggle').checked;
 
   document.getElementById('generateError').style.display = 'none';
   setGenerateLoading(true);
 
   try {
-    const configs = [...selectedIds].map(id => {
+    let configs = [...selectedIds].map(id => {
       const info = allTechniques[id];
       const opts = {};
       if (info?.options) {
@@ -2733,12 +2776,25 @@ async function doGenerate() {
       return { technique_id: id, options: opts };
     });
 
+    if (htmlOnly) {
+      configs = configs.filter(config => {
+        const technique = allTechniques[config.technique_id];
+        return !technique || !_isUrlOnlyTech(technique);
+      });
+      if (!configs.length) {
+        showGenerateError('HTML Only requires at least one HTML technique (T07–T25).');
+        return;
+      }
+    }
+
     const fd = new FormData();
     fd.append('url', url);
     fd.append('html_file', htmlFile);
     fd.append('technique_configs', JSON.stringify(configs));
     fd.append('hybrid_mode', hybrid.toString());
     fd.append('include_report', report.toString());
+    fd.append('include_screenshots', screenshots.toString());
+    fd.append('html_only', htmlOnly.toString());
     if (ssFile) fd.append('screenshot', ssFile);
 
     const _llm = getLlmCreds();
@@ -3992,7 +4048,8 @@ async function onBulkFileSelected(file) {
       ${cFilter.length ? `<span class="bulk-preview-stat">🏷 ${cFilter.join(', ')}</span>` : ''}
       <span class="bulk-preview-stat">⚡ workers <strong>${parseInt(document.getElementById('bulkWorkers').value)||d.concurrency||8}</strong></span>
       <span class="bulk-preview-stat">⏱ timeout <strong>${document.getElementById('bulkEntryTimeout').value||120}s</strong></span>
-      <span class="bulk-preview-stat">📸 screenshots <strong>${d.include_screenshots !== false ? 'on' : 'off'}</strong></span>
+      <span class="bulk-preview-stat">📸 screenshots <strong>${document.getElementById('bulkScreenshotToggle').checked ? 'on' : 'off'}</strong></span>
+      <span class="bulk-preview-stat">📄 HTML only <strong>${document.getElementById('bulkHtmlOnlyToggle').checked ? 'on' : 'off'}</strong></span>
       <span class="bulk-preview-stat">🔗 hybrid <strong>${d.hybrid_mode !== false ? 'on' : 'off'}</strong></span>
       <ul>${idsList}${more}</ul>
     `;
@@ -4061,6 +4118,8 @@ async function onBulkCsvFileSelected(file) {
       <span class="bulk-preview-stat">🔧 <strong>${tCfgs.length}</strong> technique${tCfgs.length === 1 ? '' : 's'}</span>
       <span class="bulk-preview-stat">⚡ workers <strong>${parseInt(document.getElementById('bulkWorkers').value)||8}</strong></span>
       <span class="bulk-preview-stat">⏱ timeout <strong>${document.getElementById('bulkEntryTimeout').value||120}s</strong></span>
+      <span class="bulk-preview-stat">📸 screenshots <strong>${document.getElementById('bulkScreenshotToggle').checked ? 'on' : 'off'}</strong></span>
+      <span class="bulk-preview-stat">📄 HTML only <strong>${document.getElementById('bulkHtmlOnlyToggle').checked ? 'on' : 'off'}</strong></span>
       <span class="bulk-preview-stat">📁 ${_bulkEsc(document.getElementById('bulkLegitDir').value || 'legitimate_html_archive')}</span>
       <span class="bulk-preview-stat">📂 layout <strong>${defaultsParsed.output_layout || 'per_kind'}</strong></span>
       <ul>${idsList}${more}</ul>
@@ -4089,6 +4148,8 @@ function onBulkDatasetFileSelected(file) {
     <span class="bulk-preview-stat">🔧 <strong>${tCfgs.length}</strong> technique${tCfgs.length===1?'':'s'}</span>
     <span class="bulk-preview-stat">⚡ workers <strong>${parseInt(document.getElementById('bulkWorkers').value)||8}</strong></span>
     <span class="bulk-preview-stat">⏱ timeout <strong>${document.getElementById('bulkEntryTimeout').value||120}s</strong></span>
+    <span class="bulk-preview-stat">📸 screenshots <strong>${document.getElementById('bulkScreenshotToggle').checked ? 'on' : 'off'}</strong></span>
+    <span class="bulk-preview-stat">📄 HTML only <strong>${document.getElementById('bulkHtmlOnlyToggle').checked ? 'on' : 'off'}</strong></span>
     <span class="bulk-preview-stat">📂 layout <strong>${defaultsParsed.output_layout||'per_kind'}</strong></span>
     <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
       Entries will be auto-detected from <code>.html</code> filenames in the ZIP
@@ -4296,6 +4357,9 @@ async function submitBulkJob() {
     const _timeout = parseFloat(document.getElementById('bulkEntryTimeout').value) || 120;
     defObj.concurrency = _workers;
     defObj.bulk_entry_timeout_s = _timeout;
+    defObj.include_screenshots = document.getElementById('bulkScreenshotToggle').checked;
+    defObj.html_only = document.getElementById('bulkHtmlOnlyToggle').checked;
+    if (defObj.html_only) defObj.auto_url_pairing = false;
 
     if (bulkState.csvFile) fd.append('csv_file', bulkState.csvFile);
     if (bulkState.htmlSource === 'zip') {
@@ -4315,6 +4379,8 @@ async function submitBulkJob() {
     const _tZip = parseFloat(document.getElementById('bulkEntryTimeout').value) || 120;
     fd.append('options_json', JSON.stringify({ concurrency: _wZip, bulk_entry_timeout_s: _tZip }));
   }
+  fd.append('include_screenshots', document.getElementById('bulkScreenshotToggle').checked.toString());
+  fd.append('html_only', document.getElementById('bulkHtmlOnlyToggle').checked.toString());
 
   submitBtn.disabled = true;
   submitBtn.textContent = '⏳ Uploading…';

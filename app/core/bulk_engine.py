@@ -32,6 +32,7 @@ class BulkEntry:
     hybrid_mode: bool
     include_report: bool
     include_screenshots: bool
+    html_only: bool = False
     output_layout: str = "per_entry"
     legitimate_root: Path | None = None
     llm_credentials: dict | None = None
@@ -217,12 +218,28 @@ async def process_entry(
             error=err, output_dir=out_dir,
         )
 
+    if entry.html_only:
+        configs = [
+            config for config in configs
+            if not _is_url_only_technique(config.technique_id)
+        ]
+        if not configs:
+            return EntryResult(
+                entry_id=entry.id, target_url=entry.url, success=False,
+                error=(
+                    "HTML-only mode excluded every selected technique; "
+                    "select at least one HTML technique (T07-T25)"
+                ),
+                output_dir=out_dir,
+            )
+
     configs, sub_note = _substitute_if_needed(configs, entry.url, html)
     if sub_note:
         logger.info("[%s] %s", entry.id, sub_note)
 
     if (
         entry.auto_url_pairing
+        and not entry.html_only
         and len(configs) == 1
         and not _is_url_only_technique(configs[0].technique_id)
     ):
@@ -254,6 +271,12 @@ async def process_entry(
             entry_id=entry.id, target_url=entry.url, success=False,
             error=f"engine.run failed: {exc}", output_dir=out_dir,
         )
+
+    if entry.html_only:
+        result.final_url = result.original_url
+        for technique_result in result.technique_results:
+            technique_result.modified_url = None
+            technique_result.url_before = None
 
     if is_per_kind:
         rows = await _write_per_kind(entry, result, output_root, screenshot_service)

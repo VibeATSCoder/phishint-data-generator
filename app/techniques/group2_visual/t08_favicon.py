@@ -218,7 +218,11 @@ class FaviconMimicryTechnique(BaseTechnique):
             changes.append(self._make_change(
                 "favicon_skipped",
                 "Favicon not fetched or PIL unavailable; no modification made",
-                details={"reason": reason},
+                details={
+                    "reason": reason,
+                    "links_found": len(all_icons),
+                    "links_updated": 0,
+                },
             ))
 
         return ApplyResult(

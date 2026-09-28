@@ -53,7 +53,11 @@ def _write_urls_csv(output_dir: Path, summary_path: Path) -> None:
     if not summary_path.exists():
         return
     try:
-        with summary_path.open("r", encoding="utf-8", newline="") as f:
+        # summary.csv is created with utf-8-sig. Reading it as plain UTF-8
+        # leaves the BOM attached to the first field name ("\ufeffentry_id"),
+        # which made every resumed job look unfinished and reprocessed all
+        # entries. utf-8-sig accepts both BOM and non-BOM files.
+        with summary_path.open("r", encoding="utf-8-sig", newline="") as f:
             rows = list(csv.DictReader(f))
     except Exception as exc:
         logger.warning("urls.csv: failed to read summary.csv: %s", exc)
@@ -108,7 +112,10 @@ def _read_done_entry_ids(summary_path: Path) -> set[str]:
         return set()
     done: set[str] = set()
     try:
-        with summary_path.open("r", encoding="utf-8", newline="") as f:
+        # summary.csv is created with utf-8-sig. Reading it as plain UTF-8
+        # leaves the BOM attached to the first field name, so resumed jobs do
+        # not recognize any completed entry.
+        with summary_path.open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 eid = (row.get("entry_id") or "").strip()
@@ -240,8 +247,18 @@ class JobRunner:
         summary_lock = asyncio.Lock()
         durations: list[float] = []
         durations_lock = asyncio.Lock()
-        done = int(job.get("entries_done") or 0)
-        failed = int(job.get("entries_failed") or 0)
+        # summary.csv is written before the SQLite progress update, so it is
+        # the durable source of truth after a crash or restart. The database
+        # value can lag, and older releases could also over-count on resume.
+        done = len(already_done_ids)
+        failed = min(int(job.get("entries_failed") or 0), done)
+        if (
+            done != int(job.get("entries_done") or 0)
+            or failed != int(job.get("entries_failed") or 0)
+        ):
+            self._store.update_progress(
+                job_id, entries_done=done, entries_failed=failed,
+            )
         failed_entries: list[dict] = []
 
         async def _process_one(idx: int, entry_raw: dict) -> None:
@@ -281,22 +298,25 @@ class JobRunner:
                     failed += 1
                     done_snapshot = done
                     failed_snapshot = failed
-                self._store.update_progress(
-                    job_id,
-                    entries_done=done_snapshot,
-                    entries_failed=failed_snapshot,
-                    append_error=(entry_label, err_msg),
-                )
+                    # Keep progress writes ordered with the CSV rows. When the
+                    # write happened after releasing this lock, an older async
+                    # task could overwrite a newer count.
+                    self._store.update_progress(
+                        job_id,
+                        entries_done=done_snapshot,
+                        entries_failed=failed_snapshot,
+                        append_error=(entry_label, err_msg),
+                    )
                 return
 
-            self._store.update_progress(job_id, current_entry=entry.id)
-            t0 = time.time()
             in_flight_set = self._in_flight.setdefault(job_id, set())
-            in_flight_set.add(entry.id)
-            try:
-                async with sem:
-                    if self._store.is_cancel_requested(job_id):
-                        raise _Cancelled()
+            async with sem:
+                if self._store.is_cancel_requested(job_id):
+                    raise _Cancelled()
+                self._store.update_progress(job_id, current_entry=entry.id)
+                t0 = time.time()
+                in_flight_set.add(entry.id)
+                try:
                     if kind == "crawl":
                         res = await process_crawl_entry(entry, output_dir, screenshot_service)
                         rows = res.rows
@@ -310,8 +330,8 @@ class JobRunner:
                         rows = bres.technique_rows
                         success = bres.success
                         err = bres.error
-            finally:
-                in_flight_set.discard(entry.id)
+                finally:
+                    in_flight_set.discard(entry.id)
             dt = time.time() - t0
             async with durations_lock:
                 durations.append(dt)
@@ -329,14 +349,13 @@ class JobRunner:
                     failed += 1
                 done_snapshot = done
                 failed_snapshot = failed
-
-            self._store.update_progress(
-                job_id,
-                entries_done=done_snapshot,
-                entries_failed=failed_snapshot,
-                avg_seconds_per_entry=avg,
-                append_error=(entry.id, err) if not success else None,
-            )
+                self._store.update_progress(
+                    job_id,
+                    entries_done=done_snapshot,
+                    entries_failed=failed_snapshot,
+                    avg_seconds_per_entry=avg,
+                    append_error=(entry.id, err) if not success else None,
+                )
 
         tasks = [
             asyncio.create_task(_process_one(i, e)) for i, e in enumerate(entries_raw)
@@ -424,12 +443,12 @@ class JobRunner:
             encoding="utf-8",
         )
 
-        _write_urls_csv(output_dir, summary_path)
+        if not bool(defaults.get("html_only", False)):
+            _write_urls_csv(output_dir, summary_path)
 
         self._in_flight.pop(job_id, None)
+        await asyncio.to_thread(build_results_zip, job_id)
         self._store.mark_completed(job_id)
-
-        asyncio.get_event_loop().run_in_executor(None, build_results_zip, job_id)
 
 
 def _resolve_entry(raw: dict, defaults: dict, input_dir: Path) -> BulkEntry:
@@ -475,6 +494,7 @@ def _resolve_entry(raw: dict, defaults: dict, input_dir: Path) -> BulkEntry:
     include_screenshots = bool(
         raw.get("include_screenshots", defaults.get("include_screenshots", True))
     )
+    html_only = bool(raw.get("html_only", defaults.get("html_only", False)))
     output_layout = str(raw.get("output_layout", defaults.get("output_layout", "per_entry")))
     if output_layout not in ("per_entry", "per_kind"):
         output_layout = "per_entry"
@@ -494,7 +514,7 @@ def _resolve_entry(raw: dict, defaults: dict, input_dir: Path) -> BulkEntry:
         id=eid, url=url, html_path=html_path, screenshot_path=screenshot_path,
         technique_configs=technique_configs, category_filter=category_filter,
         hybrid_mode=hybrid_mode, include_report=include_report,
-        include_screenshots=include_screenshots,
+        include_screenshots=include_screenshots, html_only=html_only,
         output_layout=output_layout, legitimate_root=legitimate_root,
         llm_credentials=llm_creds, auto_url_pairing=auto_url_pairing,
     )
