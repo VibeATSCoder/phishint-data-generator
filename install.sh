@@ -34,6 +34,8 @@ VERSION="${PHISHGEN_VERSION:-1.0.0}"
 RELEASE_TAG="v${VERSION}"
 BUNDLE_NAME="phishint-data-generator-images-${VERSION}.tar.gz"
 BUNDLE_URL="https://github.com/${OWNER}/${REPOSITORY}/releases/download/${RELEASE_TAG}/${BUNDLE_NAME}"
+BUNDLE_SIZE_BYTES="${PHISHGEN_IMAGE_SIZE_BYTES:-1192073169}"
+BUNDLE_SHA256="${PHISHGEN_IMAGE_SHA256:-6051a375756346c760c0038ba60fe94c2b2b82923c7b36afd70470b9a97b8f79}"
 BACKEND_IMAGE="phishgen_api:${VERSION}"
 UI_IMAGE="phishgen_ui:${VERSION}"
 
@@ -411,16 +413,25 @@ find_bundle() { # optional explicit path -> archive path on stdout
 }
 
 verify_bundle() { # archive
-  local archive="$1" actual=""
+  local archive="$1" actual="" size=""
+  size="$(stat -c%s "${archive}" 2>/dev/null || stat -f%z "${archive}" 2>/dev/null || true)"
+  if [ -n "${BUNDLE_SIZE_BYTES}" ] && [ "${size}" != "${BUNDLE_SIZE_BYTES}" ]; then
+    die "${archive} is ${size:-an unknown number of} bytes; expected ${BUNDLE_SIZE_BYTES}. Download it again."
+  fi
   echo "  checking compressed archive"
   gzip -t "${archive}" || die "${archive} is incomplete or corrupt; download it again"
-  if [ -n "${PHISHGEN_IMAGE_SHA256:-}" ]; then
-    command -v sha256sum >/dev/null 2>&1 \
-      || die "sha256sum is required when PHISHGEN_IMAGE_SHA256 is set"
+  echo "  checking SHA-256"
+  if command -v sha256sum >/dev/null 2>&1; then
     actual="$(sha256sum "${archive}" | awk '{print $1}')"
-    [ "${actual}" = "${PHISHGEN_IMAGE_SHA256}" ] \
-      || die "${archive} has the wrong SHA-256 checksum"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "${archive}" | awk '{print $1}')"
+  elif command -v openssl >/dev/null 2>&1; then
+    actual="$(openssl dgst -sha256 "${archive}" | awk '{print $NF}')"
+  else
+    die "a SHA-256 tool (sha256sum, shasum, or openssl) is required"
   fi
+  [ "${actual}" = "${BUNDLE_SHA256}" ] \
+    || die "${archive} has the wrong SHA-256 checksum"
 }
 
 ask_for_bundle() {
@@ -438,6 +449,7 @@ ask_for_bundle() {
     echo
     echo "You may save it anywhere, then paste its full path here."
     echo "Expected filename: ${BUNDLE_NAME}"
+    echo "Expected size: 1.11 GiB (${BUNDLE_SIZE_BYTES} bytes)"
     if [ "${HAVE_TTY}" -eq 0 ] || [ "${NO_PROMPT}" -eq 1 ]; then
       die "image archive not found. Download ${BUNDLE_URL}, then rerun with --image /path/to/${BUNDLE_NAME}"
     fi

@@ -463,6 +463,12 @@ The release contains one archive with both ready-to-run images:
 
 `phishint-data-generator-images-1.0.0.tar.gz`
 
+Download: [release image archive](https://github.com/VibeATSCoder/phishint-data-generator/releases/download/v1.0.0/phishint-data-generator-images-1.0.0.tar.gz)
+
+Size: **1.11 GiB** (`1,192,073,169` bytes)
+
+SHA-256: `6051a375756346c760c0038ba60fe94c2b2b82923c7b36afd70470b9a97b8f79`
+
 Run the one-line installer and choose option **1**. It prints the exact browser
 download link and waits for you to paste the archive path. You can also download
 the archive first and provide it directly:
@@ -471,7 +477,8 @@ the archive first and provide it directly:
 bash install.sh --image /path/to/phishint-data-generator-images-1.0.0.tar.gz
 ```
 
-The installer checks the compressed file, loads both images, and starts
+The installer checks the exact size and SHA-256, validates the compressed file,
+loads both images, and starts
 `docker-compose.images.yml`. That compose file has no build instructions and
 uses `pull_policy: never`, so Docker cannot fetch missing application layers.
 

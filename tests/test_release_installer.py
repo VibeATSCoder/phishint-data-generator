@@ -38,6 +38,8 @@ def test_installer_loads_release_images_without_building() -> None:
     assert 'images_loaded' in INSTALLER
     assert 'if [ "${IMAGE_MODE}" = "build" ]' in INSTALLER
     assert 'compose -f docker-compose.images.yml up -d' in INSTALLER
+    assert "1192073169" in INSTALLER
+    assert "6051a375756346c760c0038ba60fe94c2b2b82923c7b36afd70470b9a97b8f79" in INSTALLER
 
 
 def test_release_publishes_one_archive_containing_both_images() -> None:
