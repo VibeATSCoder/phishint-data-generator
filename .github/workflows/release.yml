@@ -1,0 +1,101 @@
+name: release-images
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, for example v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-images-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Check release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          version="$(tr -d '\r\n' < VERSION)"
+          test "$tag" = "v${version}"
+          grep -q "VERSION=\"\${PHISHGEN_VERSION:-${version}}\"" install.sh
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          docker system prune -af || true
+          df -h /
+
+      - name: Build release images
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          docker build --platform linux/amd64 --tag "phishgen_api:${version}" .
+          docker build --platform linux/amd64 --tag "phishgen_ui:${version}" ./ui
+
+      - name: Save image bundle and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          archive="phishint-data-generator-images-${version}.tar.gz"
+          docker save "phishgen_api:${version}" "phishgen_ui:${version}" | gzip -1 > "$archive"
+          sha256sum "$archive" > "${archive}.sha256"
+          echo "IMAGE_ARCHIVE=${archive}" >> "$GITHUB_ENV"
+          ls -lh "$archive" "${archive}.sha256"
+
+      - name: Verify the saved images and services
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          sha256sum -c "${IMAGE_ARCHIVE}.sha256"
+          docker image rm "phishgen_api:${version}" "phishgen_ui:${version}"
+          docker load -i "$IMAGE_ARCHIVE"
+          PHISHGEN_VERSION="$version" docker compose -f docker-compose.images.yml up -d
+          for attempt in $(seq 1 120); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8009/health >/dev/null \
+              && curl -fsS --max-time 2 http://127.0.0.1:3050/health >/dev/null; then
+              break
+            fi
+            test "$attempt" -lt 120 || {
+              docker compose -f docker-compose.images.yml logs --tail=100
+              exit 1
+            }
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8009/health
+          curl -fsS http://127.0.0.1:3050/health
+          docker compose -f docker-compose.images.yml down
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --verify-tag --title "$tag" \
+              --notes "Prebuilt backend and UI images for an install without downloading application requirements."
+          gh release upload "$tag" \
+            "$IMAGE_ARCHIVE" "${IMAGE_ARCHIVE}.sha256" \
+            install.sh docker-compose.images.yml .env.example --clobber

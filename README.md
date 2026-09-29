@@ -23,10 +23,16 @@ On Linux, macOS, WSL, or Git Bash, run:
 curl -fsSL https://raw.githubusercontent.com/VibeATSCoder/phishint-data-generator/main/install.sh | bash
 ```
 
-The installer clones or updates the repository, creates `.env`, checks Docker
-Compose, builds both images, starts the service, waits for the health checks,
-and prints the UI and API addresses. It preserves existing configuration and
-job data when run again.
+The installer clones or updates the small deployment files, creates `.env`, and
+then offers three image choices. The recommended choice displays the release
+archive link so you can download it in a browser and paste its local path. The
+installer validates and loads that archive, starts the service, waits for both
+health checks, and prints the UI and API addresses.
+
+The archive already contains the application, Python packages, Chromium, and
+the nginx UI. The server does not download requirements or build image layers.
+Only Docker Engine and Docker Compose v2 must already be installed, or you can
+allow the installer to install them.
 
 Useful variants:
 
@@ -41,6 +47,15 @@ curl -fsSL https://raw.githubusercontent.com/VibeATSCoder/phishint-data-generato
 
 # From an existing checkout
 bash install.sh
+
+# If the image archive is already in Downloads
+bash install.sh --image ~/Downloads/phishint-data-generator-images-1.0.0.tar.gz
+
+# Let the installer download the prebuilt archive itself
+bash install.sh --auto-download
+
+# Developer fallback: build all image layers locally
+bash install.sh --build
 ```
 
 Technique 23 can use `ANTHROPIC_API_KEY`. The installer asks for it when a
@@ -442,173 +457,35 @@ sudo firewall-cmd --reload
 
 ---
 
-## Offline / Air-Gapped Installation
+## Manual image download and offline installation
 
-Two approaches - pick the one that fits your situation.
+The release contains one archive with both ready-to-run images:
 
----
+`phishint-data-generator-images-1.0.0.tar.gz`
 
-### Approach A - Build on internet machine, transfer images (recommended)
-
-This is the fastest path. Build the Docker images once on any machine with internet access, export them as a tar bundle, then load and run on the air-gapped machine.
-
-**On the internet-connected machine:**
+Run the one-line installer and choose option **1**. It prints the exact browser
+download link and waits for you to paste the archive path. You can also download
+the archive first and provide it directly:
 
 ```bash
-# 1. Clone the repo and build images
-git clone https://github.com/VibeATSCoder/phishint-data-generator.git
-cd phishint-data-generator
-docker compose build
-
-# 2. Verify the image names (should show phishgen_api and phishgen_ui)
-docker images | grep phishgen
-
-# 3. Export both images to a single tar file
-docker save phishgen_api:latest phishgen_ui:latest -o phishgen_images.tar
-
-# 4. Copy the repo folder + images to a USB drive / shared storage
-#    You need: phishgen_images.tar  +  the entire repo folder
-#    (docker-compose.yml, .env.example, ui/, app/, etc.)
+bash install.sh --image /path/to/phishint-data-generator-images-1.0.0.tar.gz
 ```
 
-**Transfer** `phishgen_images.tar` and the repo folder to the air-gapped machine (USB, SCP, shared drive).
+The installer checks the compressed file, loads both images, and starts
+`docker-compose.images.yml`. That compose file has no build instructions and
+uses `pull_policy: never`, so Docker cannot fetch missing application layers.
 
-**On the air-gapped machine:**
+For an air-gapped server, transfer these items from an online machine:
 
-```bash
-# Prerequisites: Docker Engine + Docker Compose plugin must already be installed
-# (see Approach B below if Docker itself is not installed)
+| File | Purpose |
+|------|---------|
+| `phishint-data-generator-images-1.0.0.tar.gz` | Backend, dependencies, Chromium, and UI |
+| Repository checkout or release deployment files | Installer, compose file, and environment template |
+| Docker Engine packages for the target Linux distribution | Docker runtime when it is not already installed |
 
-# 1. Load the images
-docker load -i phishgen_images.tar
-
-# Verify they loaded
-docker images | grep phishgen
-
-# 2. Enter the repo folder and configure environment
-cd phishint-data-generator
-cp .env.example .env
-nano .env   # fill in ANTHROPIC_API_KEY if you need T23
-
-# 3. Start (no --build needed - images are already loaded)
-docker compose up -d
-
-# 4. Verify
-docker compose ps
-curl http://localhost:8009/health
-```
-
----
-
-### Approach B - Bundle everything from scratch (Docker + Python packages + system libs)
-
-Use this when the target machine has no Docker at all, or when you need a fully reproducible bundle.
-
-#### Step 1 - Download Docker Engine installer (offline .deb / .rpm packages)
-
-```bash
-# On online machine - download Docker offline packages for Ubuntu/Debian
-mkdir docker-offline
-cd docker-offline
-
-# Substitute your target OS version (check https://download.docker.com/linux/ubuntu/dists/)
-DOCKER_VERSION=26.1.4
-OS=ubuntu
-CODENAME=jammy    # or focal, bookworm, etc.
-ARCH=amd64
-
-# Download the 4 required .deb packages
-wget "https://download.docker.com/linux/${OS}/dists/${CODENAME}/pool/stable/${ARCH}/containerd.io_1.6.33-1_${ARCH}.deb"
-wget "https://download.docker.com/linux/${OS}/dists/${CODENAME}/pool/stable/${ARCH}/docker-ce_${DOCKER_VERSION}-1~${OS}.${CODENAME}_${ARCH}.deb"
-wget "https://download.docker.com/linux/${OS}/dists/${CODENAME}/pool/stable/${ARCH}/docker-ce-cli_${DOCKER_VERSION}-1~${OS}.${CODENAME}_${ARCH}.deb"
-wget "https://download.docker.com/linux/${OS}/dists/${CODENAME}/pool/stable/${ARCH}/docker-compose-plugin_2.27.1-1~${OS}.${CODENAME}_${ARCH}.deb"
-```
-
-> For exact package filenames, browse `https://download.docker.com/linux/ubuntu/dists/<codename>/pool/stable/amd64/` on the online machine.
-
-**On the air-gapped machine:**
-
-```bash
-# Install Docker from local .deb files
-sudo dpkg -i containerd.io_*.deb docker-ce-cli_*.deb docker-ce_*.deb docker-compose-plugin_*.deb
-sudo systemctl enable --now docker
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-#### Step 2 - Pull base images and save them
-
-```bash
-# On online machine
-docker pull python:3.11-slim
-docker pull nginx:alpine
-
-docker save python:3.11-slim nginx:alpine -o base_images.tar
-```
-
-#### Step 3 - Download Python wheels
-
-```bash
-# On online machine (same Python version as the base image: 3.11)
-pip download -r requirements.txt -d ./pip_wheels/ --python-version 3.11 --platform manylinux_2_17_x86_64 --only-binary=:all:
-
-# If some packages don't have binary wheels, also run without --only-binary:
-pip download -r requirements.txt -d ./pip_wheels/
-```
-
-#### Step 4 - Bundle and transfer
-
-```bash
-# On online machine - create a single transfer bundle
-tar czf phishgen_offline_bundle.tar.gz \
-    phishint-data-generator/ \
-    base_images.tar \
-    docker-offline/ \
-    pip_wheels/
-```
-
-Transfer the bundle to the air-gapped machine.
-
-#### Step 5 - Install on air-gapped machine
-
-```bash
-# Extract the bundle
-tar xzf phishgen_offline_bundle.tar.gz
-
-# 1. Install Docker (if not already installed)
-cd docker-offline
-sudo dpkg -i containerd.io_*.deb docker-ce-cli_*.deb docker-ce_*.deb docker-compose-plugin_*.deb
-sudo systemctl enable --now docker && sudo usermod -aG docker $USER && newgrp docker
-
-# 2. Load base images
-docker load -i base_images.tar
-
-# 3. Patch the Dockerfiles to install Python packages from local wheels
-#    Add --find-links /wheels --no-index flags:
-sed -i 's|RUN pip install --no-cache-dir -r requirements.txt|COPY ../pip_wheels /wheels\nRUN pip install --no-cache-dir --find-links /wheels --no-index -r requirements.txt|' \
-    phishint-data-generator/Dockerfile
-
-# 4. Build images (uses local base images + local wheels - no internet)
-cd phishint-data-generator
-cp .env.example .env
-docker compose build
-
-# 5. Start
-docker compose up -d
-docker compose ps
-curl http://localhost:8009/health
-```
-
----
-
-### Quick reference - what each file in the bundle provides
-
-| File / folder | Purpose |
-|---------------|---------|
-| `phishint-data-generator/` | Application source code + docker-compose.yml |
-| `base_images.tar` | `python:3.11-slim` and `nginx:alpine` Docker base images |
-| `docker-offline/` | Docker Engine `.deb` packages for air-gapped installation |
-| `pip_wheels/` | Pre-downloaded Python package wheels (all dependencies) |
+Once Docker Engine and Compose v2 are installed, the image archive is the only
+large application download. No Python wheels, browser packages, base images, or
+requirements download is needed on the target server.
 
 ---
 

@@ -1,0 +1,40 @@
+services:
+  backend:
+    image: phishgen_api:${PHISHGEN_VERSION:-1.0.0}
+    pull_policy: never
+    container_name: phishgen_api
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLEARBIT_API_KEY=${CLEARBIT_API_KEY:-}
+      - DEBUG=false
+      - DATA_DIR=/data
+    ports:
+      - "8009:8009"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8009/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - phishnet
+
+  ui:
+    image: phishgen_ui:${PHISHGEN_VERSION:-1.0.0}
+    pull_policy: never
+    container_name: phishgen_ui
+    restart: unless-stopped
+    ports:
+      - "3050:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - phishnet
+
+networks:
+  phishnet:
+    driver: bridge
